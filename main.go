@@ -50,13 +50,13 @@ type CGCoin struct {
 
 // CGCoinSingleton defines a singleton coin and its features.
 type CGCoinSingleton struct {
-	ID                 string             `json:"id"`
-	Symbol             string             `json:"symbol"`
-	Name               string             `json:"name"`
-	BlockTimeInMinutes float64            `json:"block_time_in_minutes"`
-	LastUpdated        string             `json:"last_updated"`
-	Tickers            []CGTicker         `json:"tickers"`
-	MarketData         []CGCoinMarketData `json:"market_data"`
+	ID                 string           `json:"id"`
+	Symbol             string           `json:"symbol"`
+	Name               string           `json:"name"`
+	BlockTimeInMinutes float64          `json:"block_time_in_minutes"`
+	LastUpdated        string           `json:"last_updated"`
+	Tickers            []CGTicker       `json:"tickers"`
+	MarketData         CGCoinMarketData `json:"market_data"`
 }
 
 // CGCoinMarketData encapsulates price change data over time.
@@ -115,9 +115,14 @@ func main() {
 		// }
 	}
 
-	res, _ := httpRequest(CGCoinURLs["btc"], userAgent)
+	res, _ := httpRequest(CGCoinURLs["usdt"], userAgent)
 	var coin CGCoinSingleton
 	json.Unmarshal(res, &coin)
+
+	var testlisting listing
+	testlisting.color = false
+	testlisting.name = true
+	testlisting.target = "GBP"
 	displayCoinListing(coin, defaultListing())
 }
 
@@ -129,7 +134,7 @@ func displayCoinListing(coin CGCoinSingleton, list listing) {
 		color.New(color.FgBlack, color.BgBlue).Print(" " + coin.Symbol + " ")
 		fmt.Print(" ")
 	} else {
-		buf.WriteString(coin.Symbol + " ")
+		buf.WriteString(" " + coin.Symbol + "  ")
 	}
 
 	if list.name {
@@ -142,8 +147,19 @@ func displayCoinListing(coin CGCoinSingleton, list listing) {
 
 	for i, t := range coin.Tickers {
 		if t.Target == list.target {
-			buf.WriteString(MonetarySymbols[list.target] +
-				fmt.Sprintf("%.2f", coin.Tickers[i].Last) + " ")
+			if list.color {
+				if coin.MarketData.PriceChange24h >= 0 {
+					color.BgGreen.Print(" " + MonetarySymbols[list.target] +
+						fmt.Sprintf("%.2f", coin.Tickers[i].Last) + " ")
+				} else {
+					color.BgRed.Print(" " + MonetarySymbols[list.target] +
+						fmt.Sprintf("%.2f", coin.Tickers[i].Last) + " ")
+				}
+			} else {
+				buf.WriteString(" " + MonetarySymbols[list.target] +
+					fmt.Sprintf("%.2f", coin.Tickers[i].Last) + " ")
+			}
+			fmt.Print(" ")
 			if list.volume {
 				buf.WriteString(fmt.Sprintf("%.8f", coin.Tickers[i].Volume))
 			}
