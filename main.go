@@ -5,6 +5,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"log"
 	"time"
 	"unicode/utf8"
 
@@ -22,7 +23,7 @@ import (
 )
 
 const (
-	userAgent string = "ccpc"
+	userAgent string = "ccpc, https://github.com/oishiiburger/ccpc"
 )
 
 // target is used to set the currency for comparison.
@@ -54,8 +55,8 @@ func defaultListingWidths() listing {
 	self.blockTIMWidth = 11
 	self.errWidth = 38
 	self.lastUpdatedWidth = 27
-	self.nameWidth = 16
-	self.priceWidth = 14
+	self.nameWidth = 25
+	self.priceWidth = 28
 	self.symbolWidth = 9
 	self.volumeWidth = 18
 	return self
@@ -97,7 +98,7 @@ func main() {
 	}
 
 	// CLI flag handling
-	allPtr := flag.BoolP("all", "a", false, "Yields listings for all supported coins. (Generally not recommended)")
+	allPtr := flag.BoolP("all", "a", false, "Yields listings for all known coins. (Generally not recommended)")
 	blkPtr := flag.BoolP("block-time", "b", false, "Includes block time in the listing, if available.")
 	bwtPtr := flag.BoolP("no-color", "c", false, "Disables output colors.")
 	maxPtr := flag.BoolP("maximum", "m", false, "Yields maximum detail listings for the selected coins.")
@@ -105,8 +106,8 @@ func main() {
 	tgtPtr := flag.StringP("target", "t", "usd", "Determines the target currency for comparison (e.g. usd, jpy).")
 	timPtr := flag.BoolP("no-time", "z", false, "Omits last update time in the listing.")
 	volPtr := flag.BoolP("volume", "v", false, "Includes coin volume in the listing, if available.")
-	lcPtr := flag.Bool("list-coins", false, "Displays a listing of all supported coins.")
-	lmPtr := flag.Bool("list-currencies", false, "Displays a listing of all supported currencies.")
+	lcPtr := flag.Bool("list-coins", false, "Displays a listing of all known coins.")
+	lmPtr := flag.Bool("list-currencies", false, "Displays a listing of all known currencies.")
 	flag.Parse()
 	// maxListing is copied over listingProperties, so it must be first
 	if *maxPtr {
@@ -132,7 +133,7 @@ func main() {
 		if len(cgapi.MonetarySymbols[tgt]) > 0 {
 			listingProps.target = tgt
 		} else {
-			errMessage("Unsupported target currency: "+tgt, listingProps)
+			errMessage("Unknown target currency: "+tgt+".", false, listingProps)
 		}
 	}
 	if *timPtr {
@@ -158,12 +159,23 @@ func main() {
 	} else if !*allPtr {
 		var args []string
 		for _, arg := range os.Args[1:] {
-			if !strings.Contains(arg, "-") && len(cgapi.CGCoinURLs[arg]) > 0 {
+			if !strings.Contains(arg, "-") &&
+				(len(cgapi.CGCoinURLs[arg]) > 0 ||
+					len(cgapi.CGCoinURLs[strings.ToUpper(arg)]) > 0) {
 				args = append(args, arg)
+			} else {
+				errMessage("Coin symbol "+arg+" is not in the known set.", false, listingProps)
 			}
 		}
 		for _, arg := range args {
-			res, _ := httpRequest(cgapi.CGCoinURLs[arg], userAgent)
+			var symb = arg
+			if cgapi.CGCoinURLs[symb] == "" {
+				symb = strings.ToUpper(arg)
+			}
+			res, err := httpRequest(cgapi.CGCoinURLs[symb], userAgent)
+			if err != nil {
+				errMessage("HTTP request did not complete successfully.", true, listingProps)
+			}
 			var coin cgapi.CGCoinSingleton
 			json.Unmarshal(res, &coin)
 			generateCoinTicker(coin, listingProps)
@@ -175,19 +187,27 @@ func main() {
 func generateCoinTicker(coin cgapi.CGCoinSingleton, list listing) {
 	var tickerIdx int
 	if len(coin.Symbol) < 1 {
-		errMessage("Symbol not found.")
+		// can this even happen?
+		errMessage("Coin symbol was not successfully loaded.", true, list)
 	} else {
 		tPrint(coin.Symbol, list.symbol, list, color.BgBlue, list.symbolWidth)
 		tPrint(coin.Name, list.name, list, color.FgBlue, list.nameWidth)
 		if len(coin.Tickers) > 0 { // check to make sure this coin has a ticker
 			for tickerIdx, t := range coin.Tickers {
 				if t.Target == list.target {
+					var per string
+					if coin.MarketData.PriceChange24hPc != 0 {
+						if coin.MarketData.PriceChange24hPc >= 0 {
+							per = "+"
+						}
+						per = "(" + per + fmt.Sprintf("%3.2f", coin.MarketData.PriceChange24hPc) + "%/24h)"
+					}
 					if coin.MarketData.PriceChange24h >= 0 {
-						tPrint(cgapi.MonetarySymbols[list.target]+fmt.Sprintf("%.2f", coin.Tickers[tickerIdx].Last),
-							true, list, color.BgGreen, list.priceWidth)
+						tPrint(cgapi.MonetarySymbols[list.target]+fmt.Sprintf("%.2f", coin.Tickers[tickerIdx].Last)+
+							" "+per, true, list, color.BgGreen, list.priceWidth)
 					} else {
-						tPrint(cgapi.MonetarySymbols[list.target]+fmt.Sprintf("%.2f", coin.Tickers[tickerIdx].Last),
-							true, list, color.BgRed, list.priceWidth)
+						tPrint(cgapi.MonetarySymbols[list.target]+fmt.Sprintf("%.2f", coin.Tickers[tickerIdx].Last)+
+							" "+per, true, list, color.BgRed, list.priceWidth)
 					}
 					break
 				}
@@ -200,7 +220,7 @@ func generateCoinTicker(coin cgapi.CGCoinSingleton, list listing) {
 		}
 		tm, err := time.Parse(time.RFC3339Nano, coin.LastUpdated)
 		if err != nil {
-			errMessage("Could not parse time string from API.")
+			errMessage("Could not parse time string from API.", true)
 		}
 		tPrint("UPD:"+tm.Format(time.RFC822), list.lastUpdated, list, color.BgDarkGray, list.lastUpdatedWidth)
 		if len(coin.Tickers) > 0 {
@@ -214,32 +234,34 @@ func generateCoinTicker(coin cgapi.CGCoinSingleton, list listing) {
 }
 
 // Helper function for printing tickers.
-func tPrint(ifc interface{}, chk bool, lst listing, col color.Color, wid int, str ...string) {
-	switch ifc.(type) {
-	case string:
-		if lst.color {
-			col.Print(cenTextInRange(ifc.(string), wid))
-		} else {
-			fmt.Print(cenTextInRange(ifc.(string), wid))
-		}
-	case float64:
-		var id string
-		if len(str) > 0 {
-			id = str[0]
-		}
-		var form string
-		switch id {
-		case "VOL:":
-			form = "%.4f"
-		case "BT:":
-			form = "%2.1f"
-		default:
-			form = "%f"
-		}
-		if lst.color {
-			col.Print(cenTextInRange(id+fmt.Sprintf(form, ifc), wid))
-		} else {
-			fmt.Print(cenTextInRange(id+fmt.Sprintf(form, ifc), wid))
+func tPrint(ifc interface{}, chk bool, lst listing, col color.Color, wid int, labl ...string) {
+	if chk {
+		switch ifc.(type) {
+		case string:
+			if lst.color {
+				col.Print(cenTextInRange(ifc.(string), wid))
+			} else {
+				fmt.Print(cenTextInRange(ifc.(string), wid))
+			}
+		case float64:
+			var id string
+			if len(labl) > 0 {
+				id = labl[0]
+			}
+			var form string
+			switch id {
+			case "VOL:":
+				form = "%.4f"
+			case "BT:":
+				form = "%2.1f"
+			default:
+				form = "%f"
+			}
+			if lst.color {
+				col.Print(cenTextInRange(id+fmt.Sprintf(form, ifc), wid))
+			} else {
+				fmt.Print(cenTextInRange(id+fmt.Sprintf(form, ifc), wid))
+			}
 		}
 	}
 }
@@ -267,7 +289,11 @@ func httpRequest(coinSymbol, userAgent string) (contents []byte, err error) {
 // Returns a string which is centered in the middle of the range.
 func cenTextInRange(str string, rng int) string {
 	if utf8.RuneCountInString(str) > rng {
-		errMessage("A requested string was too long to fit within a column.")
+		if rng > 4 {
+			str = str[:rng-5] + "."
+		} else {
+			str = "."
+		}
 	}
 	diff := rng - utf8.RuneCountInString(str)
 	buf := new(bytes.Buffer)
@@ -305,17 +331,16 @@ func listTableKeys(mp map[string]string, str string) {
 	}
 }
 
-// Give user an irrecoverable error message and exit.
-func errMessage(str string, lst ...listing) {
+// Give user an error message and sometimes exit.
+func errMessage(str string, exit bool, lst ...listing) {
 	if len(lst) > 0 {
-		if lst[0].color {
-			color.BgRed.Print("  error  ")
-		} else {
-			fmt.Print("  error  ")
+		tPrint("error", true, lst[0], color.BgRed, 9)
+		tPrint(str, true, lst[0], color.FgDefault, len(str)+4)
+		if exit {
+			os.Exit(1)
 		}
 	} else {
-		fmt.Print("  error  ")
+		log.Fatal(str)
 	}
-	fmt.Println(" " + str)
-	os.Exit(1)
+	fmt.Println()
 }
