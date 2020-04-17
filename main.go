@@ -13,72 +13,13 @@ import (
 	"sort"
 	"time"
 
+	"../ccpc/cgapi"
 	"github.com/gookit/color"
 )
 
 const (
 	userAgent string = "ccpc"
-
-	// CGCoinURL is the API URL for the upmost coin array.
-	CGCoinURL string = "https://api.coingecko.com/api/v3/coins"
 )
-
-// CGCoinURLs is a mapping of coin symbols to API URLs.
-var CGCoinURLs = map[string]string{
-	"btc":  "https://api.coingecko.com/api/v3/coins/bitcoin",
-	"eth":  "https://api.coingecko.com/api/v3/coins/ethereum",
-	"xrp":  "https://api.coingecko.com/api/v3/coins/ripple",
-	"usdt": "https://api.coingecko.com/api/v3/coins/tether",
-	"bch":  "https://api.coingecko.com/api/v3/coins/bitcoin-cash",
-	"ltc":  "https://api.coingecko.com/api/v3/coins/litecoin",
-	"eos":  "https://api.coingecko.com/api/v3/coins/eos",
-	"bnb":  "https://api.coingecko.com/api/v3/coins/binancecoin",
-	"bsv":  "https://api.coingecko.com/api/v3/coins/bitcoin-cash-sv"}
-
-// MonetarySymbols is a mapping of currency abbreviations to symbols.
-var MonetarySymbols = map[string]string{
-	"USD": "$",
-	"GBP": "£",
-	"JPY": "¥",
-	"EUR": "€",
-	"BTC": "btc"}
-
-// CGCoin defines a coin and its features.
-type CGCoin struct {
-	ID                 string `json:"id"`
-	Symbol             string `json:"symbol"`
-	Name               string `json:"name"`
-	BlockTimeInMinutes string `json:"block_time_in_minutes"`
-	LastUpdated        string `json:"last_updated"`
-}
-
-// CGCoinSingleton defines a singleton coin and its features.
-type CGCoinSingleton struct {
-	ID                 string           `json:"id"`
-	Symbol             string           `json:"symbol"`
-	Name               string           `json:"name"`
-	BlockTimeInMinutes float64          `json:"block_time_in_minutes"`
-	LastUpdated        string           `json:"last_updated"`
-	Tickers            []CGTicker       `json:"tickers"`
-	MarketData         CGCoinMarketData `json:"market_data"`
-}
-
-// CGCoinMarketData encapsulates price change data over time.
-type CGCoinMarketData struct {
-	PriceChange24h   float64 `json:"price_change_24h"`
-	PriceChange24hPc float64 `json:"price_change_percentage_24h"`
-	// others exist in the JSON
-}
-
-// CGTicker defines tickers which exist for each coin.
-type CGTicker struct {
-	Base       string  `json:"base"`
-	Target     string  `json:"target"`
-	Last       float64 `json:"last"`
-	Volume     float64 `json:"volume"`
-	TrustScore string  `json:"trust_score"`
-	Timestamp  string  `json:"timestamp"`
-}
 
 // target is used to set the currency for comparison.
 type target struct {
@@ -107,6 +48,20 @@ func defaultListing() listing {
 	return self
 }
 
+// MaxListing defines the maximal set of included elements in a listing.
+func maxListing() listing {
+	self := listing{}
+	self.symbol = true
+	self.name = true
+	self.target = "USD"
+	self.lastUpdated = true
+	self.color = true
+	self.blockTimeInMinutes = true
+	self.volume = true
+	return self
+}
+
+// Entry point handles Args and flags
 func main() {
 	// CLI flag handling
 	allPtr := flag.Bool("all", false, "Yields default listings for all supported coins.")
@@ -114,23 +69,23 @@ func main() {
 
 	// -all
 	if *allPtr {
-		var keys = make([]string, len(CGCoinURLs))
+		var keys = make([]string, len(cgapi.CGCoinURLs))
 		i := 0
-		for k := range CGCoinURLs {
+		for k := range cgapi.CGCoinURLs {
 			keys[i] = k
 			i++
 		}
 		sort.Strings(keys)
 		for key := 0; key < len(keys); key++ {
-			res, _ := httpRequest(CGCoinURLs[keys[key]], userAgent)
-			var coin CGCoinSingleton
+			res, _ := httpRequest(cgapi.CGCoinURLs[keys[key]], userAgent)
+			var coin cgapi.CGCoinSingleton
 			json.Unmarshal(res, &coin)
 			displayCoinListing(coin, defaultListing(), true)
 		}
 	}
 
-	// res, _ := httpRequest(CGCoinURLs["btc"], userAgent)
-	// var coin CGCoinSingleton
+	// res, _ := httpRequest(cgapi.CGCoinURLs["btc"], userAgent)
+	// var coin cgapi.CGCoinSingleton
 	// json.Unmarshal(res, &coin)
 	// var testlisting listing
 	// testlisting.color = true
@@ -143,7 +98,7 @@ func main() {
 }
 
 // Display a coin ticker.
-func displayCoinListing(coin CGCoinSingleton, list listing, leftAlign bool) {
+func displayCoinListing(coin cgapi.CGCoinSingleton, list listing, leftAlign bool) {
 	if len(coin.Symbol) > 1 {
 		buf := new(bytes.Buffer) // buffer is only used when not in color mode
 		if list.color {
@@ -162,21 +117,21 @@ func displayCoinListing(coin CGCoinSingleton, list listing, leftAlign bool) {
 			if t.Target == list.target {
 				if list.color {
 					if coin.MarketData.PriceChange24h >= 0 {
-						color.BgGreen.Print(ctir(MonetarySymbols[list.target]+
+						color.BgGreen.Print(ctir(cgapi.MonetarySymbols[list.target]+
 							fmt.Sprintf("%.2f", coin.Tickers[i].Last), 14, leftAlign))
 					} else {
-						color.BgRed.Print(ctir(MonetarySymbols[list.target]+
+						color.BgRed.Print(ctir(cgapi.MonetarySymbols[list.target]+
 							fmt.Sprintf("%.2f", coin.Tickers[i].Last), 14, leftAlign))
 					}
 				} else {
-					buf.WriteString(ctir(MonetarySymbols[list.target]+
+					buf.WriteString(ctir(cgapi.MonetarySymbols[list.target]+
 						fmt.Sprintf("%.2f", coin.Tickers[i].Last), 14, leftAlign))
 				}
 				if list.volume {
 					if list.color {
-						color.BgDarkGray.Print(ctir("VOL:"+fmt.Sprintf("%.8f", coin.Tickers[i].Volume), 20))
+						color.BgDarkGray.Print(ctir("VOL:"+fmt.Sprintf("%.8f", coin.Tickers[i].Volume), 25, leftAlign))
 					} else {
-						buf.WriteString(ctir("VOL:"+fmt.Sprintf("%.8f", coin.Tickers[i].Volume), 20))
+						buf.WriteString(ctir("VOL:"+fmt.Sprintf("%.8f", coin.Tickers[i].Volume), 25, leftAlign))
 					}
 				}
 				break
@@ -196,9 +151,9 @@ func displayCoinListing(coin CGCoinSingleton, list listing, leftAlign bool) {
 			}
 			if list.blockTimeInMinutes {
 				if list.color {
-					color.BgDarkGray.Print(ctir("BT:"+fmt.Sprintf("%.2f", coin.BlockTimeInMinutes)+" MINS", 15))
+					color.BgDarkGray.Print(ctir("BT:"+fmt.Sprintf("%.2f", coin.BlockTimeInMinutes)+" MINS", 16, leftAlign))
 				} else {
-					buf.WriteString(ctir("BT:"+fmt.Sprintf("%.2f", coin.BlockTimeInMinutes)+" MINS", 15))
+					buf.WriteString(ctir("BT:"+fmt.Sprintf("%.2f", coin.BlockTimeInMinutes)+" MINS", 16, leftAlign))
 				}
 			}
 		}
@@ -262,7 +217,7 @@ func ctir(str string, rng int, left ...bool) string {
 			for i := 0; i < (diff-1)/2; i++ {
 				buf.WriteString(" ")
 			}
-			buf.WriteString(str + " ")
+			buf.WriteString(" " + str)
 			for i := 0; i < (diff-1)/2; i++ {
 				buf.WriteString(" ")
 			}
