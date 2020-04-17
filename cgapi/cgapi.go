@@ -26,8 +26,7 @@ var MonetarySymbols = map[string]string{
 	"USD": "$",
 	"GBP": "£",
 	"JPY": "¥",
-	"EUR": "€",
-	"BTC": "btc"}
+	"EUR": "€"}
 
 // CGCoin defines a coin and its features.
 type CGCoin struct {

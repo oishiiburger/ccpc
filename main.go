@@ -8,7 +8,6 @@ import (
 
 	"fmt"
 	"io/ioutil"
-	"log"
 	"net/http"
 	"os"
 	"sort"
@@ -85,6 +84,8 @@ func main() {
 	tgtPtr := flag.StringP("target", "t", "usd", "Determines the target currency for comparison (e.g. usd, jpy).")
 	timPtr := flag.BoolP("no-time", "z", false, "Omits last update time in the listing.")
 	volPtr := flag.BoolP("volume", "v", false, "Includes coin volume in the listing, if available.")
+	lcPtr := flag.Bool("list-coins", false, "Displays a listing of all supported coins.")
+	lmPtr := flag.Bool("list-currencies", false, "Displays a listing of all supported currencies.")
 	flag.Parse()
 	// maxListing is copied over listingProperties, so it must be first
 	if *maxPtr {
@@ -96,11 +97,22 @@ func main() {
 	if *bwtPtr {
 		listingProps.color = false
 	}
+	if *lcPtr {
+		listTableKeys(cgapi.CGCoinURLs, "coins")
+	}
+	if *lmPtr {
+		listTableKeys(cgapi.MonetarySymbols, "currencies")
+	}
 	if *namPtr {
 		listingProps.name = false
 	}
 	if len(*tgtPtr) > 0 {
-		listingProps.target = strings.ToUpper(*tgtPtr)
+		tgt := strings.ToUpper(*tgtPtr)
+		if len(cgapi.MonetarySymbols[tgt]) > 0 {
+			listingProps.target = tgt
+		} else {
+			errHandler("Unsupported target currency: "+tgt, listingProps)
+		}
 	}
 	if *timPtr {
 		listingProps.lastUpdated = false
@@ -110,13 +122,7 @@ func main() {
 	}
 	// --all needs other listingProperties ready
 	if *allPtr {
-		var keys = make([]string, len(cgapi.CGCoinURLs))
-		i := 0
-		for k := range cgapi.CGCoinURLs {
-			keys[i] = k
-			i++
-		}
-		sort.Strings(keys)
+		keys := mapToSortedStrings(cgapi.CGCoinURLs)
 		for key := 0; key < len(keys); key++ {
 			res, _ := httpRequest(cgapi.CGCoinURLs[keys[key]], userAgent)
 			var coin cgapi.CGCoinSingleton
@@ -258,7 +264,7 @@ func httpRequest(url, userAgent string) (contents []byte, err error) {
 // Returns a string which is centered in the middle of the range.
 func ctir(str string, rng int, left ...bool) string {
 	if len(str) > rng {
-		log.Fatal("String too long for range when centering in column.")
+		errHandler("String too long to fit in column.")
 	}
 	if str == "" {
 		str = "(unknown)"
@@ -290,4 +296,40 @@ func ctir(str string, rng int, left ...bool) string {
 		}
 	}
 	return buf.String()
+}
+
+// Takes a map and returns an sorted slice of strings.
+func mapToSortedStrings(mp map[string]string) []string {
+	var keys = make([]string, len(mp))
+	i := 0
+	for k := range mp {
+		keys[i] = k
+		i++
+	}
+	sort.Strings(keys)
+	return keys
+}
+
+// Displays all the available items in a string map exported from cgapi.
+func listTableKeys(mp map[string]string, str string) {
+	items := mapToSortedStrings(mp)
+	fmt.Println("Available " + str + ":")
+	for i, val := range items {
+		fmt.Printf("%v\t%v\n", i, val)
+	}
+}
+
+// Give user an irrecoverable error message and exit.
+func errHandler(str string, lst ...listing) {
+	if len(lst) > 0 {
+		if lst[0].color {
+			color.BgRed.Print("  error  ")
+		} else {
+			fmt.Print("  error  ")
+		}
+	} else {
+		fmt.Print("  error  ")
+	}
+	fmt.Println(" " + str)
+	os.Exit(1)
 }
