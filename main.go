@@ -6,6 +6,10 @@ import (
 	"bytes"
 	"encoding/json"
 	"log"
+	"os/exec"
+	"os/signal"
+	"runtime"
+	"syscall"
 	"time"
 	"unicode/utf8"
 
@@ -101,10 +105,12 @@ func main() {
 	allPtr := flag.BoolP("all", "a", false, "Yields listings for all known coins. (Generally not recommended)")
 	blkPtr := flag.BoolP("block-time", "b", false, "Includes block time in the listing, if available.")
 	bwtPtr := flag.BoolP("no-color", "c", false, "Disables output colors.")
+	durPtr := flag.UintP("update-duration", "d", 30, "Sets the duraton (seconds) for the rate of update mode.")
 	maxPtr := flag.BoolP("maximum", "m", false, "Yields maximum detail listings for the selected coins.")
 	namPtr := flag.BoolP("no-name", "n", false, "Omits coin name in the listing.")
 	tgtPtr := flag.StringP("target", "t", "usd", "Determines the target currency for comparison (e.g. usd, jpy).")
 	timPtr := flag.BoolP("no-time", "z", false, "Omits last update time in the listing.")
+	updPtr := flag.BoolP("update-mode", "u", false, "Updates the same set of tickers every no. of seconds.")
 	volPtr := flag.BoolP("volume", "v", false, "Includes coin volume in the listing, if available.")
 	lcPtr := flag.Bool("list-coins", false, "Displays a listing of all known coins.")
 	lmPtr := flag.Bool("list-currencies", false, "Displays a listing of all known currencies.")
@@ -128,12 +134,12 @@ func main() {
 	if *namPtr {
 		listingProps.name = false
 	}
-	if len(*tgtPtr) > 0 {
+	if *tgtPtr != "" {
 		tgt := strings.ToUpper(*tgtPtr)
 		if len(cgapi.MonetarySymbols[tgt]) > 0 {
 			listingProps.target = tgt
 		} else {
-			errMessage("Unknown target currency: "+tgt+".", false, listingProps)
+			usrMessage("Unknown target currency: "+tgt+".", false, listingProps)
 		}
 	}
 	if *timPtr {
@@ -144,12 +150,16 @@ func main() {
 	}
 	// --all needs other listingProperties ready
 	if *allPtr {
-		keys := mapToSortedStrings(cgapi.CGCoinURLs)
-		for key := 0; key < len(keys); key++ {
-			res, _ := httpRequest(cgapi.CGCoinURLs[keys[key]], userAgent)
-			var coin cgapi.CGCoinSingleton
-			json.Unmarshal(res, &coin)
-			generateCoinTicker(coin, listingProps)
+		if *updPtr {
+			usrMessage("Cannot yield all listings in update mode.", true, listingProps)
+		} else {
+			keys := mapToSortedStrings(cgapi.CGCoinURLs)
+			for key := 0; key < len(keys); key++ {
+				res, _ := httpRequest(cgapi.CGCoinURLs[keys[key]], userAgent)
+				var coin cgapi.CGCoinSingleton
+				json.Unmarshal(res, &coin)
+				generateCoinTicker(coin, listingProps)
+			}
 		}
 	}
 
@@ -163,23 +173,60 @@ func main() {
 				(len(cgapi.CGCoinURLs[arg]) > 0 ||
 					len(cgapi.CGCoinURLs[strings.ToUpper(arg)]) > 0) {
 				args = append(args, arg)
-			} else {
-				errMessage("Coin symbol "+arg+" is not in the known set.", false, listingProps)
+			} else if !strings.Contains(arg, "-") {
+				usrMessage("Coin symbol "+arg+" is not in the known set.", false, listingProps)
 			}
 		}
-		for _, arg := range args {
-			var symb = arg
-			if cgapi.CGCoinURLs[symb] == "" {
-				symb = strings.ToUpper(arg)
-			}
-			res, err := httpRequest(cgapi.CGCoinURLs[symb], userAgent)
-			if err != nil {
-				errMessage("HTTP request did not complete successfully.", true, listingProps)
-			}
-			var coin cgapi.CGCoinSingleton
-			json.Unmarshal(res, &coin)
-			generateCoinTicker(coin, listingProps)
+		runOnceOrUpdate(args, listingProps, *updPtr, *durPtr)
+	}
+}
+
+// Will run continuously when in update mode.
+func runOnceOrUpdate(args []string, list listing, upd bool, dur uint) {
+	clearCmd := make(map[string]func())
+update:
+	if upd {
+		sig := make(chan os.Signal, 1)
+		signal.Notify(sig, os.Interrupt, syscall.SIGTERM)
+		go func() {
+			<-sig
+			os.Exit(0)
+		}()
+
+		clearCmd["windows"] = func() {
+			clear := exec.Command("cmd", "/c", "cls")
+			clear.Stdout = os.Stdout
+			clear.Run()
 		}
+		clearCmd["linux"] = func() {
+			clear := exec.Command("clear")
+			clear.Stdout = os.Stdout
+			clear.Run()
+		}
+		_, ok := clearCmd[runtime.GOOS]
+		if !ok {
+			usrMessage("No screen clear function for this platform.", true)
+		}
+		clearCmd[runtime.GOOS]()
+	}
+	var i int = 0
+	for _, arg := range args {
+		var symb = arg
+		if cgapi.CGCoinURLs[symb] == "" {
+			symb = strings.ToUpper(arg)
+		}
+		res, err := httpRequest(cgapi.CGCoinURLs[symb], userAgent)
+		if err != nil {
+			usrMessage("HTTP request did not complete successfully.", true, list)
+		}
+		var coin cgapi.CGCoinSingleton
+		json.Unmarshal(res, &coin)
+		generateCoinTicker(coin, list)
+		i++
+	}
+	if upd {
+		time.Sleep(time.Duration(dur) * time.Second)
+		goto update
 	}
 }
 
@@ -187,8 +234,7 @@ func main() {
 func generateCoinTicker(coin cgapi.CGCoinSingleton, list listing) {
 	var tickerIdx int
 	if len(coin.Symbol) < 1 {
-		// can this even happen?
-		errMessage("Coin symbol was not successfully loaded.", true, list)
+		usrMessage("Coin symbol was not successfully loaded.", true, list)
 	} else {
 		tPrint(coin.Symbol, list.symbol, list, color.BgBlue, list.symbolWidth)
 		tPrint(coin.Name, list.name, list, color.FgBlue, list.nameWidth)
@@ -220,7 +266,7 @@ func generateCoinTicker(coin cgapi.CGCoinSingleton, list listing) {
 		}
 		tm, err := time.Parse(time.RFC3339Nano, coin.LastUpdated)
 		if err != nil {
-			errMessage("Could not parse time string from API.", true)
+			usrMessage("Could not parse time string from API.", true)
 		}
 		tPrint("UPD:"+tm.Format(time.RFC822), list.lastUpdated, list, color.BgDarkGray, list.lastUpdatedWidth)
 		if len(coin.Tickers) > 0 {
@@ -230,7 +276,7 @@ func generateCoinTicker(coin cgapi.CGCoinSingleton, list listing) {
 		}
 		tPrint(coin.BlockTimeInMinutes, list.blockTIM, list, color.BgDarkGray, list.blockTIMWidth, "BT:")
 	}
-	fmt.Println()
+	fmt.Println(" ")
 }
 
 // Helper function for printing tickers.
@@ -332,9 +378,13 @@ func listTableKeys(mp map[string]string, str string) {
 }
 
 // Give user an error message and sometimes exit.
-func errMessage(str string, exit bool, lst ...listing) {
+func usrMessage(str string, exit bool, lst ...listing) {
 	if len(lst) > 0 {
-		tPrint("error", true, lst[0], color.BgRed, 9)
+		if exit {
+			tPrint("error", true, lst[0], color.BgRed, 9)
+		} else {
+			tPrint("note!", true, lst[0], color.BgYellow, 9)
+		}
 		tPrint(str, true, lst[0], color.FgDefault, len(str)+4)
 		if exit {
 			os.Exit(1)
