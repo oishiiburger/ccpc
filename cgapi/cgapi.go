@@ -1,25 +1,8 @@
 // cgapi.go
-// Some structs and hash maps for the Coin Gecko API are herein.
-// This is not exhaustive, and probably never will be.package CGapi
+// Some structs and hash tables for the Coin Gecko API are here.
+// This is not exhaustive, and probably never will be.
 
 package cgapi
-
-const (
-	// CGCoinURL is the API URL for the upmost coin array.
-	CGCoinURL string = "https://api.coingecko.com/api/v3/coins"
-)
-
-// CGCoinURLs is a mapping of coin symbols to API URLs.
-var CGCoinURLs = map[string]string{
-	"btc": "https://api.coingecko.com/api/v3/coins/bitcoin",
-	"eth": "https://api.coingecko.com/api/v3/coins/ethereum",
-	"xrp": "https://api.coingecko.com/api/v3/coins/ripple",
-	//	"usdt": "https://api.coingecko.com/api/v3/coins/tether",
-	"bch": "https://api.coingecko.com/api/v3/coins/bitcoin-cash",
-	"ltc": "https://api.coingecko.com/api/v3/coins/litecoin",
-	"eos": "https://api.coingecko.com/api/v3/coins/eos",
-	"bnb": "https://api.coingecko.com/api/v3/coins/binancecoin",
-	"bsv": "https://api.coingecko.com/api/v3/coins/bitcoin-cash-sv"}
 
 // MonetarySymbols is a mapping of currency abbreviations to symbols.
 var MonetarySymbols = map[string]string{

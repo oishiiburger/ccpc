@@ -5,6 +5,8 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"time"
+	"unicode/utf8"
 
 	"fmt"
 	"io/ioutil"
@@ -12,7 +14,6 @@ import (
 	"os"
 	"sort"
 	"strings"
-	"time"
 
 	"ccpc/cgapi"
 
@@ -31,20 +32,40 @@ type target struct {
 
 // Listing defines included elements in a possible listing.
 type listing struct {
-	blockTimeInMinutes bool
-	color              bool
-	lastUpdated        bool
-	name               bool
-	symbol             bool
-	target             string
-	volume             bool
+	blockTIM         bool
+	blockTIMWidth    int
+	color            bool
+	errWidth         int
+	lastUpdated      bool
+	lastUpdatedWidth int
+	name             bool
+	nameWidth        int
+	priceWidth       int
+	symbol           bool
+	symbolWidth      int
+	target           string
+	volume           bool
+	volumeWidth      int
+}
+
+// DefaultListingWidths defines the default field widths for a listing.
+func defaultListingWidths() listing {
+	self := listing{}
+	self.blockTIMWidth = 11
+	self.errWidth = 38
+	self.lastUpdatedWidth = 27
+	self.nameWidth = 16
+	self.priceWidth = 14
+	self.symbolWidth = 9
+	self.volumeWidth = 18
+	return self
 }
 
 // DefaultListing defines the standard set of included elements in a listing.
 func defaultListing() listing {
-	self := listing{}
-	self.symbol = true
+	self := defaultListingWidths()
 	self.name = true
+	self.symbol = true
 	self.target = "USD"
 	self.lastUpdated = true
 	self.color = true
@@ -53,13 +74,13 @@ func defaultListing() listing {
 
 // MaxListing defines the maximal set of included elements in a listing.
 func maxListing() listing {
-	self := listing{}
+	self := defaultListing()
 	self.symbol = true
 	self.name = true
 	self.target = "USD"
 	self.lastUpdated = true
 	self.color = true
-	self.blockTimeInMinutes = true
+	self.blockTIM = true
 	self.volume = true
 	return self
 }
@@ -76,7 +97,7 @@ func main() {
 	}
 
 	// CLI flag handling
-	allPtr := flag.BoolP("all", "a", false, "Yields listings for all supported coins.")
+	allPtr := flag.BoolP("all", "a", false, "Yields listings for all supported coins. (Generally not recommended)")
 	blkPtr := flag.BoolP("block-time", "b", false, "Includes block time in the listing, if available.")
 	bwtPtr := flag.BoolP("no-color", "c", false, "Disables output colors.")
 	maxPtr := flag.BoolP("maximum", "m", false, "Yields maximum detail listings for the selected coins.")
@@ -92,7 +113,7 @@ func main() {
 		listingProps = maxListing()
 	}
 	if *blkPtr {
-		listingProps.blockTimeInMinutes = true
+		listingProps.blockTIM = true
 	}
 	if *bwtPtr {
 		listingProps.color = false
@@ -111,7 +132,7 @@ func main() {
 		if len(cgapi.MonetarySymbols[tgt]) > 0 {
 			listingProps.target = tgt
 		} else {
-			errHandler("Unsupported target currency: "+tgt, listingProps)
+			errMessage("Unsupported target currency: "+tgt, listingProps)
 		}
 	}
 	if *timPtr {
@@ -127,7 +148,7 @@ func main() {
 			res, _ := httpRequest(cgapi.CGCoinURLs[keys[key]], userAgent)
 			var coin cgapi.CGCoinSingleton
 			json.Unmarshal(res, &coin)
-			displayCoinListing(coin, listingProps, true)
+			generateCoinTicker(coin, listingProps)
 		}
 	}
 
@@ -142,109 +163,91 @@ func main() {
 			}
 		}
 		for _, arg := range args {
-			var leftAlign bool = false
-			if len(args) > 1 {
-				leftAlign = true // align if there are multiple symbols to check
-			}
 			res, _ := httpRequest(cgapi.CGCoinURLs[arg], userAgent)
 			var coin cgapi.CGCoinSingleton
 			json.Unmarshal(res, &coin)
-			displayCoinListing(coin, listingProps, leftAlign)
+			generateCoinTicker(coin, listingProps)
 		}
 	}
 }
 
-// Display a coin ticker.
-func displayCoinListing(coin cgapi.CGCoinSingleton, list listing, leftAlign bool) {
-	if len(coin.Symbol) > 1 {
-		buf := new(bytes.Buffer) // buffer is only used when not in color mode
-		if list.color {
-			color.New(color.FgBlack, color.BgBlue).Print(ctir(coin.Symbol, 6, leftAlign))
-		} else {
-			buf.WriteString(ctir(coin.Symbol, 6, leftAlign))
-		}
-		if list.name {
-			if list.color {
-				color.FgBlue.Print(ctir(coin.Name, 16, leftAlign))
-			} else {
-				buf.WriteString(fmt.Sprint(ctir(coin.Name, 16, leftAlign)))
-			}
-		}
-		for i, t := range coin.Tickers {
-			if t.Target == list.target {
-				if list.color {
-					if coin.MarketData.PriceChange24h >= 0 {
-						color.BgGreen.Print(ctir(cgapi.MonetarySymbols[list.target]+
-							fmt.Sprintf("%.2f", coin.Tickers[i].Last), 14, leftAlign))
-					} else {
-						color.BgRed.Print(ctir(cgapi.MonetarySymbols[list.target]+
-							fmt.Sprintf("%.2f", coin.Tickers[i].Last), 14, leftAlign))
-					}
-				} else {
-					buf.WriteString(ctir(cgapi.MonetarySymbols[list.target]+
-						fmt.Sprintf("%.2f", coin.Tickers[i].Last), 14, leftAlign))
-				}
-				if list.volume {
-					if list.color {
-						color.BgDarkGray.Print(ctir("VOL:"+fmt.Sprintf("%.8f", coin.Tickers[i].Volume), 25, leftAlign))
-					} else {
-						buf.WriteString(ctir("VOL:"+fmt.Sprintf("%.8f", coin.Tickers[i].Volume), 25, leftAlign))
-					}
-				}
-				break
-			}
-			if i == len(coin.Tickers)-1 {
-				if list.color {
-					color.BgDarkGray.Print(ctir(cgapi.MonetarySymbols[list.target]+"------", 14, leftAlign))
-				} else {
-					buf.WriteString(ctir(cgapi.MonetarySymbols[list.target]+"------", 14, leftAlign))
-				}
-				if list.volume {
-					if list.color {
-						color.BgDarkGray.Print(ctir("", 25, leftAlign))
-					} else {
-						buf.WriteString(ctir("", 25, leftAlign))
-					}
-				}
-			}
-		}
-		if list.lastUpdated || list.blockTimeInMinutes {
-			if list.lastUpdated {
-				tm, _ := time.Parse(time.RFC3339Nano, coin.LastUpdated)
-				if list.color {
-					color.BgDarkGray.Print(ctir("UPD:"+tm.Format(time.RFC822), 25))
-				} else {
-					buf.WriteString(ctir("UPD:"+tm.Format(time.RFC822), 25))
-				}
-			}
-			if list.blockTimeInMinutes {
-				if list.color {
-					color.BgDarkGray.Print(ctir("BT:"+fmt.Sprintf("%.1f", coin.BlockTimeInMinutes)+"m", 12, leftAlign))
-				} else {
-					buf.WriteString(ctir("BT:"+fmt.Sprintf("%.1f", coin.BlockTimeInMinutes)+"m", 12, leftAlign))
-				}
-			}
-		}
-		if !list.color {
-			buf.WriteString(" ")
-			fmt.Print(buf.String())
-		} else {
-			color.BgDarkGray.Print(" ")
-		}
+// Generate a coin ticker.
+func generateCoinTicker(coin cgapi.CGCoinSingleton, list listing) {
+	var tickerIdx int
+	if len(coin.Symbol) < 1 {
+		errMessage("Symbol not found.")
 	} else {
-		if list.color {
-			color.BgYellow.Print(ctir("Symbol not found or network error.", 38, leftAlign))
+		tPrint(coin.Symbol, list.symbol, list, color.BgBlue, list.symbolWidth)
+		tPrint(coin.Name, list.name, list, color.FgBlue, list.nameWidth)
+		if len(coin.Tickers) > 0 { // check to make sure this coin has a ticker
+			for tickerIdx, t := range coin.Tickers {
+				if t.Target == list.target {
+					if coin.MarketData.PriceChange24h >= 0 {
+						tPrint(cgapi.MonetarySymbols[list.target]+fmt.Sprintf("%.2f", coin.Tickers[tickerIdx].Last),
+							true, list, color.BgGreen, list.priceWidth)
+					} else {
+						tPrint(cgapi.MonetarySymbols[list.target]+fmt.Sprintf("%.2f", coin.Tickers[tickerIdx].Last),
+							true, list, color.BgRed, list.priceWidth)
+					}
+					break
+				}
+				if tickerIdx == len(coin.Tickers)-1 {
+					tPrint("no price", true, list, color.BgYellow, list.priceWidth)
+				}
+			}
 		} else {
-			fmt.Print(ctir("Symbol not found or network error.", 38, leftAlign))
+			tPrint("no price", true, list, color.BgYellow, list.priceWidth)
 		}
+		tm, err := time.Parse(time.RFC3339Nano, coin.LastUpdated)
+		if err != nil {
+			errMessage("Could not parse time string from API.")
+		}
+		tPrint("UPD:"+tm.Format(time.RFC822), list.lastUpdated, list, color.BgDarkGray, list.lastUpdatedWidth)
+		if len(coin.Tickers) > 0 {
+			tPrint(coin.Tickers[tickerIdx].Volume, list.volume, list, color.BgDarkGray, list.volumeWidth, "VOL:")
+		} else {
+			tPrint("no volume", list.volume, list, color.BgDarkGray, list.volumeWidth, "VOL:")
+		}
+		tPrint(coin.BlockTimeInMinutes, list.blockTIM, list, color.BgDarkGray, list.blockTIMWidth, "BT:")
 	}
 	fmt.Println()
 }
 
+// Helper function for printing tickers.
+func tPrint(ifc interface{}, chk bool, lst listing, col color.Color, wid int, str ...string) {
+	switch ifc.(type) {
+	case string:
+		if lst.color {
+			col.Print(cenTextInRange(ifc.(string), wid))
+		} else {
+			fmt.Print(cenTextInRange(ifc.(string), wid))
+		}
+	case float64:
+		var id string
+		if len(str) > 0 {
+			id = str[0]
+		}
+		var form string
+		switch id {
+		case "VOL:":
+			form = "%.4f"
+		case "BT:":
+			form = "%2.1f"
+		default:
+			form = "%f"
+		}
+		if lst.color {
+			col.Print(cenTextInRange(id+fmt.Sprintf(form, ifc), wid))
+		} else {
+			fmt.Print(cenTextInRange(id+fmt.Sprintf(form, ifc), wid))
+		}
+	}
+}
+
 // Performs an HTTP request.
-func httpRequest(url, userAgent string) (contents []byte, err error) {
+func httpRequest(coinSymbol, userAgent string) (contents []byte, err error) {
 	cli := http.Client{}
-	req, err := http.NewRequest("GET", url, nil)
+	req, err := http.NewRequest("GET", cgapi.CGCoinURL+coinSymbol, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -262,38 +265,21 @@ func httpRequest(url, userAgent string) (contents []byte, err error) {
 }
 
 // Returns a string which is centered in the middle of the range.
-func ctir(str string, rng int, left ...bool) string {
-	if len(str) > rng {
-		errHandler("String too long to fit in column.")
+func cenTextInRange(str string, rng int) string {
+	if utf8.RuneCountInString(str) > rng {
+		errMessage("A requested string was too long to fit within a column.")
 	}
-	if str == "" {
-		str = "(unknown)"
-	}
-	diff := rng - len(str)
+	diff := rng - utf8.RuneCountInString(str)
 	buf := new(bytes.Buffer)
-	if len(left) > 0 && left[0] && diff > 2 {
-		buf.WriteString("  " + str)
-		for i := 1 + len(str); i < rng; i++ {
-			buf.WriteString(" ")
-		}
-	} else {
-		if diff%2 == 0 {
-			for i := 0; i < diff/2; i++ {
-				buf.WriteString(" ")
-			}
-			buf.WriteString(str)
-			for i := 0; i < diff/2; i++ {
-				buf.WriteString(" ")
-			}
-		} else {
-			for i := 0; i < (diff-1)/2; i++ {
-				buf.WriteString(" ")
-			}
-			buf.WriteString(str + " ")
-			for i := 0; i < (diff-1)/2; i++ {
-				buf.WriteString(" ")
-			}
-		}
+	if diff%2 != 0 {
+		str = str + " "
+	}
+	for i := 0; i < diff/2; i++ {
+		buf.WriteString(" ")
+	}
+	buf.WriteString(str)
+	for i := 0; i < diff/2; i++ {
+		buf.WriteString(" ")
 	}
 	return buf.String()
 }
@@ -320,7 +306,7 @@ func listTableKeys(mp map[string]string, str string) {
 }
 
 // Give user an irrecoverable error message and exit.
-func errHandler(str string, lst ...listing) {
+func errMessage(str string, lst ...listing) {
 	if len(lst) > 0 {
 		if lst[0].color {
 			color.BgRed.Print("  error  ")
