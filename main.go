@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"runtime"
+	"strconv"
 	"syscall"
 	"time"
 	"unicode/utf8"
@@ -108,6 +109,7 @@ func main() {
 	durPtr := flag.UintP("update-duration", "d", 30, "Sets the duraton (seconds) for the rate of update mode.")
 	maxPtr := flag.BoolP("maximum", "m", false, "Yields maximum detail listings for the selected coins.")
 	namPtr := flag.BoolP("no-name", "n", false, "Omits coin name in the listing.")
+	pngPtr := flag.BoolP("ping", "p", false, "Pings the Coin Gecko API and shows the message.")
 	tgtPtr := flag.StringP("target", "t", "usd", "Determines the target currency for comparison (e.g. usd, jpy).")
 	timPtr := flag.BoolP("no-time", "z", false, "Omits last update time in the listing.")
 	updPtr := flag.BoolP("update-mode", "u", false, "Updates the same set of tickers every no. of seconds.")
@@ -129,17 +131,26 @@ func main() {
 		listTableKeys(cgapi.CGCoinURLs, "coins")
 	}
 	if *lmPtr {
-		listTableKeys(cgapi.MonetarySymbols, "currencies")
+		listTableKeys(cgapi.MonetarySymbols, "currencies", cgapi.MonetaryNames)
 	}
 	if *namPtr {
 		listingProps.name = false
+	}
+	if *pngPtr {
+		res, err := httpRequest(cgapi.APIPingURL, userAgent)
+		if err != nil {
+			usrMessage("Coin Gecko API is not responding.", true, listingProps)
+		}
+		var ping cgapi.APIPing
+		json.Unmarshal(res, &ping)
+		usrMessage("API has responded: "+ping.PingMsg, false, listingProps)
 	}
 	if *tgtPtr != "" {
 		tgt := strings.ToUpper(*tgtPtr)
 		if len(cgapi.MonetarySymbols[tgt]) > 0 {
 			listingProps.target = tgt
 		} else {
-			usrMessage("Unknown target currency: "+tgt+".", false, listingProps)
+			usrMessage("Unknown target currency: "+tgt+"; using default.", false, listingProps)
 		}
 	}
 	if *timPtr {
@@ -155,7 +166,7 @@ func main() {
 		} else {
 			keys := mapToSortedStrings(cgapi.CGCoinURLs)
 			for key := 0; key < len(keys); key++ {
-				res, _ := httpRequest(cgapi.CGCoinURLs[keys[key]], userAgent)
+				res, _ := httpRequest(cgapi.CGCoinURL+cgapi.CGCoinURLs[keys[key]], userAgent)
 				var coin cgapi.CGCoinSingleton
 				json.Unmarshal(res, &coin)
 				generateCoinTicker(coin, listingProps)
@@ -167,17 +178,7 @@ func main() {
 	if len(os.Args) == 1 {
 		flag.Usage()
 	} else if !*allPtr {
-		var args []string
-		for _, arg := range os.Args[1:] {
-			if !strings.Contains(arg, "-") &&
-				(len(cgapi.CGCoinURLs[arg]) > 0 ||
-					len(cgapi.CGCoinURLs[strings.ToUpper(arg)]) > 0) {
-				args = append(args, arg)
-			} else if !strings.Contains(arg, "-") {
-				usrMessage("Coin symbol "+arg+" is not in the known set.", false, listingProps)
-			}
-		}
-		runOnceOrUpdate(args, listingProps, *updPtr, *durPtr)
+		runOnceOrUpdate(flag.Args(), listingProps, *updPtr, *durPtr)
 	}
 }
 
@@ -215,7 +216,7 @@ update:
 		if cgapi.CGCoinURLs[symb] == "" {
 			symb = strings.ToUpper(arg)
 		}
-		res, err := httpRequest(cgapi.CGCoinURLs[symb], userAgent)
+		res, err := httpRequest(cgapi.CGCoinURL+cgapi.CGCoinURLs[symb], userAgent)
 		if err != nil {
 			usrMessage("HTTP request did not complete successfully.", true, list)
 		}
@@ -234,7 +235,7 @@ update:
 func generateCoinTicker(coin cgapi.CGCoinSingleton, list listing) {
 	var tickerIdx int
 	if len(coin.Symbol) < 1 {
-		usrMessage("Coin symbol was not successfully loaded.", true, list)
+		// usrMessage("Coin symbol was not successfully loaded.", true, list)
 	} else {
 		tPrint(coin.Symbol, list.symbol, list, color.BgBlue, list.symbolWidth)
 		tPrint(coin.Name, list.name, list, color.FgBlue, list.nameWidth)
@@ -313,9 +314,9 @@ func tPrint(ifc interface{}, chk bool, lst listing, col color.Color, wid int, la
 }
 
 // Performs an HTTP request.
-func httpRequest(coinSymbol, userAgent string) (contents []byte, err error) {
+func httpRequest(URL, userAgent string) (contents []byte, err error) {
 	cli := http.Client{}
-	req, err := http.NewRequest("GET", cgapi.CGCoinURL+coinSymbol, nil)
+	req, err := http.NewRequest("GET", URL, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -369,11 +370,18 @@ func mapToSortedStrings(mp map[string]string) []string {
 }
 
 // Displays all the available items in a string map exported from cgapi.
-func listTableKeys(mp map[string]string, str string) {
+// If trailing argument is populated, it is assumed that map1.keys == mapn.keys
+func listTableKeys(mp map[string]string, str string, more ...map[string]string) {
 	items := mapToSortedStrings(mp)
 	fmt.Println("Available " + str + ":")
-	for i, val := range items {
-		fmt.Printf("%v\t%v\n", i, val)
+	for i, key := range items {
+		fmt.Print(strconv.Itoa(i) + "\t" + key + "\t" + mp[key])
+		if len(more) > 0 {
+			for _, otherMap := range more {
+				fmt.Print("\t" + otherMap[key])
+			}
+		}
+		fmt.Println()
 	}
 }
 
@@ -383,7 +391,7 @@ func usrMessage(str string, exit bool, lst ...listing) {
 		if exit {
 			tPrint("error", true, lst[0], color.BgRed, 9)
 		} else {
-			tPrint("note!", true, lst[0], color.BgYellow, 9)
+			tPrint("attn!", true, lst[0], color.BgYellow, 9)
 		}
 		tPrint(str, true, lst[0], color.FgDefault, len(str)+4)
 		if exit {
