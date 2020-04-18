@@ -97,6 +97,11 @@ func main() {
 
 	// Set usage message
 	flag.Usage = func() {
+		color.BgBlue.Print("  ccpc  ")
+		color.BgDarkGray.Println("  crypto coin price checker ")
+		fmt.Println("Chris Graham, 2020")
+		fmt.Println("https://github.com/oishiiburger/ccpc")
+		fmt.Print("Powered by CoinGecko API.\n\n")
 		fmt.Println("Usage: ccpc symbol(s) [options]")
 		fmt.Println("Options:")
 		flag.PrintDefaults()
