@@ -236,6 +236,8 @@ update:
 			usrMessage("No screen clear function for this platform.", true)
 		}
 		clearCmd[runtime.GOOS]()
+		d := fmt.Sprint(dur)
+		usrMessage("You are running ccpc in update mode. Will update every "+d+" seconds.", false, list)
 	}
 	for _, arg := range args {
 		var symb = arg
