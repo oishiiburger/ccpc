@@ -3,6 +3,7 @@
 package main
 
 import (
+	"bufio"
 	"bytes"
 	"encoding/json"
 	"log"
@@ -94,6 +95,7 @@ func maxListing() listing {
 // Entry point handles Args and flags
 func main() {
 	var listingProps listing = defaultListing()
+	var symbolsFile []string
 
 	// Set usage message
 	flag.Usage = func() {
@@ -112,6 +114,7 @@ func main() {
 	blkPtr := flag.BoolP("block-time", "b", false, "Includes block time in the listing, if available.")
 	bwtPtr := flag.BoolP("no-color", "c", false, "Disables output colors.")
 	durPtr := flag.UintP("update-duration", "d", 30, "Sets the duraton (seconds) for the rate of update mode.")
+	filPtr := flag.StringP("symbols-from-file", "f", "", "Loads a list of symbols from a text file, one symbol per line.")
 	maxPtr := flag.BoolP("maximum", "m", false, "Yields maximum detail listings for the selected coins.")
 	namPtr := flag.BoolP("no-name", "n", false, "Omits coin name in the listing.")
 	pngPtr := flag.BoolP("ping", "p", false, "Pings the Coin Gecko API and shows the message.")
@@ -131,6 +134,16 @@ func main() {
 	}
 	if *bwtPtr {
 		listingProps.color = false
+	}
+	if *filPtr != "" {
+		file, err := os.Open(*filPtr)
+		if err != nil {
+			usrMessage("Could not load specified symbol file.", true, listingProps)
+		}
+		s := bufio.NewScanner(file)
+		for s.Scan() {
+			symbolsFile = append(symbolsFile, s.Text())
+		}
 	}
 	if *lcPtr {
 		listTableKeys(cgapi.CGCoinURLs, "coins")
@@ -183,7 +196,16 @@ func main() {
 	if len(os.Args) == 1 {
 		flag.Usage()
 	} else if !*allPtr {
-		runOnceOrUpdate(flag.Args(), listingProps, *updPtr, *durPtr)
+		var args []string
+		if len(symbolsFile) > 0 {
+			for _, s := range symbolsFile {
+				args = append(args, s)
+			}
+		}
+		for _, a := range flag.Args() {
+			args = append(args, a)
+		}
+		runOnceOrUpdate(args, listingProps, *updPtr, *durPtr)
 	}
 }
 
@@ -215,7 +237,6 @@ update:
 		}
 		clearCmd[runtime.GOOS]()
 	}
-	var i int = 0
 	for _, arg := range args {
 		var symb = arg
 		if cgapi.CGCoinURLs[symb] == "" {
@@ -228,7 +249,6 @@ update:
 		var coin cgapi.CGCoinSingleton
 		json.Unmarshal(res, &coin)
 		generateCoinTicker(coin, list)
-		i++
 	}
 	if upd {
 		time.Sleep(time.Duration(dur) * time.Second)
