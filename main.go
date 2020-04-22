@@ -244,13 +244,17 @@ update:
 		if cgapi.CGCoinURLs[symb] == "" {
 			symb = strings.ToUpper(arg)
 		}
-		res, err := httpRequest(cgapi.CGCoinURL+cgapi.CGCoinURLs[symb], userAgent)
-		if err != nil {
-			usrMessage("HTTP request did not complete successfully.", true, list)
+		if cgapi.CGCoinURLs[symb] == "" {
+			usrMessage("Unknown coin symbol '"+symb+"'", false, list)
+		} else {
+			res, err := httpRequest(cgapi.CGCoinURL+cgapi.CGCoinURLs[symb], userAgent)
+			if err != nil {
+				usrMessage("HTTP request did not complete successfully.", true, list)
+			}
+			var coin cgapi.CGCoinSingleton
+			json.Unmarshal(res, &coin)
+			generateCoinTicker(coin, list)
 		}
-		var coin cgapi.CGCoinSingleton
-		json.Unmarshal(res, &coin)
-		generateCoinTicker(coin, list)
 	}
 	if upd {
 		time.Sleep(time.Duration(dur) * time.Second)
