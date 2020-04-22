@@ -340,8 +340,9 @@ func tPrint(ifc interface{}, chk bool, lst listing, col color.Color, wid int, la
 	}
 }
 
-// Performs an HTTP request.
+// Performs an HTTP request and updates the user.
 func httpRequest(URL, userAgent string) (contents []byte, err error) {
+	fmt.Print("Fetching data...\r")
 	cli := http.Client{}
 	req, err := http.NewRequest("GET", URL, nil)
 	if err != nil {
